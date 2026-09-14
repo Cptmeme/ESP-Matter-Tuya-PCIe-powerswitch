@@ -52,7 +52,7 @@ Commands used:
 | `0x06` | →MCU | set datapoint |
 | `0x07` | MCU→ | datapoint status report |
 | `0x08` | →MCU | query all datapoints |
-| `0x1C` | MCU→ | get local time (we ignore it) |
+| `0x1C` | both | get local time (we answer "time not obtained", like ESPHome without a clock) |
 
 ### Datapoints
 Only **DP1** seen:
@@ -71,9 +71,12 @@ Only **DP1** seen:
 ## 4. Desired behavior (implemented)
 
 Single Matter **On/Off Plug‑in Unit** endpoint = "PC Power":
-- **On** → `PressPowerOn()` writes DP1=1 (tap button → boot).
+- **On** → `PressPowerOn()` writes DP1=1 (tap button → boot). Skipped if the PC is already sensed on.
 - **Off** → **no command sent**; the OnOff attribute reverts to the sensed state.
 - State always mirrors the MCU‑sensed DP1, so a Windows shutdown shows as Off on its own.
+  Every DP1 report (incl. the 60 s query) re‑syncs the attribute, so an On that didn't
+  boot the PC reverts to Off within a minute (same as the ESPHome template switch).
+- MCU restart (heartbeat reply `0x00` while running) → handshake is redone.
 
 ---
 
@@ -84,12 +87,12 @@ Single Matter **On/Off Plug‑in Unit** endpoint = "PC Power":
     `TY_HEARTBEAT → TY_PRODUCT → TY_CONF → TY_WIFI_STATUS → TY_QUERY → TY_RUNNING`
     (advances on MCU replies, retries, force‑advances after ~5 s so it can't stall).
   - `PressPowerOn()` → write DP1=1. No "power off" method by design.
-  - Parses `0x07` reports → updates `pcswitch_state_t.power` → state callback.
+  - Parses `0x07` reports → updates `pcswitch_state_t.power` → state callback on every DP1 report.
 - `app_main.cpp` — creates the single `on_off_plug_in_unit` endpoint; standard Matter/Thread bringup.
 - `app_driver.cpp` — glue:
-  - Matter On → `PressPowerOn()`; Matter Off → no‑op + `report()` revert to sensed.
-  - MCU state change → `report()` OnOff = sensed power (uses `report()`, not `update()`,
-    so it never re‑triggers the write callback = no loop).
+  - Matter On → `PressPowerOn()` (unless already on); Matter Off → no‑op + `report()` revert to sensed.
+  - DP1 report → `report()` OnOff = sensed power when the attribute differs (uses `report()`,
+    not `update()`, so it never re‑triggers the write callback = no loop).
   - Poll task calls `pcsw.Service()`.
 - `app_priv.h` — `TUYA_TX_PIN 16`, `TUYA_RX_PIN 17`.
 - `CMakeLists.txt` — project name `pc_switch`.
@@ -106,6 +109,10 @@ doesn't exist. Re‑provision the venv:
 cd ~/esp/esp-idf && ./install.sh esp32c6
 ```
 (The old `idf5.3_py3.13_env` still exists if you'd rather force Python 3.13 on PATH.)
+Without reinstalling, this works (verified 2026-09-14, clean build):
+```bash
+export IDF_PYTHON_ENV_PATH=~/.espressif/python_env/idf5.3_py3.13_env
+```
 
 ### Build / flash
 ```bash

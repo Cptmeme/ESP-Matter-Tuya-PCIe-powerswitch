@@ -41,10 +41,17 @@ static void report_onoff(bool on)
     esp_matter::attribute::report(pc_switch_endpoint_id, OnOff::Id, OnOff::Attributes::OnOff::Id, &val);
 }
 
-// MCU sensed a state change -> reflect the real PC power state into Matter.
+// MCU reported the sensed PC state -> reflect it into Matter when the attribute
+// disagrees (also corrects an On that never booted the PC, or a stale NVS value).
 static void ReportSensedTask(intptr_t context)
 {
-    report_onoff((bool)context);
+    bool sensed = (bool)context;
+    esp_matter_attr_val_t cur = esp_matter_invalid(NULL);
+    if (esp_matter::attribute::get_val(pc_switch_endpoint_id, OnOff::Id, OnOff::Attributes::OnOff::Id, &cur) == ESP_OK &&
+        cur.val.b == sensed) {
+        return;
+    }
+    report_onoff(sensed);
 }
 
 static void tuya_state_change_callback(const pcswitch_state_t *state)
@@ -66,9 +73,14 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle, uint16_
     if (endpoint_id == pc_switch_endpoint_id && cluster_id == OnOff::Id &&
         attribute_id == OnOff::Attributes::OnOff::Id) {
         if (val->val.b) {
-            // ON -> tap the PC power button.
-            ESP_LOGI(TAG, "Matter: PC Power ON -> pressing button");
-            pcsw.PressPowerOn();
+            if (pcsw.GetState().power) {
+                // Already running: never tap the button of a live PC.
+                ESP_LOGI(TAG, "Matter: PC Power ON ignored (PC already on)");
+            } else {
+                // ON -> tap the PC power button.
+                ESP_LOGI(TAG, "Matter: PC Power ON -> pressing button");
+                pcsw.PressPowerOn();
+            }
         } else {
             // OFF -> send nothing; revert the attribute to the real sensed state
             // (runs after this update commits).

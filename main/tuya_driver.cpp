@@ -208,6 +208,11 @@ void TuyaPcSwitch::ProcessPacket(const uint8_t *packet, int len) {
 
     switch (cmd) {
     case TUYA_CMD_HEARTBEAT:
+        // Reply byte: 0x00 = first beat after the MCU (re)booted, 0x01 = running.
+        if (len > 7 && packet[6] == 0x00 && m_init_state != TY_HEARTBEAT) {
+            ESP_LOGW(TAG, "MCU restarted; redoing handshake");
+            m_init_state = TY_HEARTBEAT;
+        }
         if (m_init_state == TY_HEARTBEAT) {
             ESP_LOGI(TAG, "MCU alive");
             AdvanceState(TY_PRODUCT);
@@ -231,9 +236,13 @@ void TuyaPcSwitch::ProcessPacket(const uint8_t *packet, int len) {
         ParseDatapoints(packet, len);
         break;
 
-    case TUYA_CMD_GET_TIME:
-        // No reliable wall-clock before commissioning; ignore. Device still operates.
+    case TUYA_CMD_GET_TIME: {
+        // No wall clock over Thread: answer "time not obtained" (first byte 0),
+        // like ESPHome does without a valid time, so the MCU isn't left waiting.
+        static const uint8_t no_time[8] = {0};
+        SendFrame(TUYA_CMD_GET_TIME, no_time, sizeof(no_time));
         break;
+    }
 
     default:
         break;
@@ -243,7 +252,7 @@ void TuyaPcSwitch::ProcessPacket(const uint8_t *packet, int len) {
 void TuyaPcSwitch::ParseDatapoints(const uint8_t *packet, int len) {
     int pos = 6;
     int end = len - 1;
-    bool changed = false;
+    bool seen = false;
 
     while (pos < end) {
         if (pos + 4 > end) break;
@@ -262,14 +271,17 @@ void TuyaPcSwitch::ParseDatapoints(const uint8_t *packet, int len) {
         }
 
         if (dp_id == DP_POWER) {
-            bool new_power = (val == 1);
-            if (m_state.power != new_power) { m_state.power = new_power; changed = true; }
+            m_state.power = (val == 1);
+            seen = true;
         }
 
         pos += 4 + data_len;
     }
 
-    if (changed) NotifyStateChange();
+    // Notify on every DP1 report, not only on changes: the Matter attribute can
+    // drift from the sensed state (e.g. On was pressed but the PC didn't boot),
+    // and the periodic query is what pulls it back.
+    if (seen) NotifyStateChange();
 }
 
 void TuyaPcSwitch::NotifyStateChange() {

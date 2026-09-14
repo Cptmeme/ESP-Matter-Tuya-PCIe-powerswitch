@@ -17,7 +17,7 @@
 #define TUYA_CMD_SET_DP      0x06   // module -> MCU (control)
 #define TUYA_CMD_REPORT_DP   0x07   // MCU -> module (status report)
 #define TUYA_CMD_QUERY_DP    0x08   // module -> MCU (query all)
-#define TUYA_CMD_GET_TIME    0x1C   // MCU -> module (get local time)
+#define TUYA_CMD_GET_TIME    0x1C   // MCU -> module (get local time; we answer "not obtained")
 
 // Network status byte for TUYA_CMD_WIFI_STATE (we're always "online" via Thread)
 #define TUYA_WIFI_ONLINE     0x04
@@ -45,6 +45,7 @@ typedef struct {
     bool power;   // DP1 (sensed PC power state)
 } pcswitch_state_t;
 
+// Called on every DP1 report from the MCU (changed or not).
 typedef void (*tuya_state_change_cb_t)(const pcswitch_state_t *state);
 
 class TuyaPcSwitch {
