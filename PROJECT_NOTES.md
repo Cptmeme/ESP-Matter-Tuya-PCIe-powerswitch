@@ -4,7 +4,7 @@ Firmware that replaces the stock Tuya Wi‑Fi module in a **Tuya PC power‑swit
 (the kind that taps the motherboard power‑button header) with a native
 **Matter‑over‑Thread** On/Off device on an **ESP32‑C6 (WT0132C6‑S5)** module.
 
-Sister project: the Tuya heater at `../Thermostat_Tuya` (same approach, decoded first).
+Sister project: the Tuya heater at `../ESP-Matter-Hombli-2000W-heater` (same approach, decoded first).
 
 ---
 
