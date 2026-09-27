@@ -118,7 +118,7 @@ export IDF_PYTHON_ENV_PATH=~/.espressif/python_env/idf5.3_py3.13_env
 ```bash
 source ~/esp/esp-idf/export.sh
 source ~/.espressif/esp-matter/export.sh
-cd ~/esp/PC_Switch_Tuya
+cd ~/esp/ESP-Matter-Tuya-PCIe-powerswitch
 idf.py -DIDF_TARGET=esp32c6 build           # (target already set once build/ exists)
 idf.py -p <port> flash monitor              # first flash over native USB; then OTA
 ```
