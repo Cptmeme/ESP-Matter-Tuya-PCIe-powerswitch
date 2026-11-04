@@ -19,7 +19,8 @@ Sister project: the EUROM Alutherm 1500 Tuya heater at `../ESP-Matter-EUROM-Alut
 
 ## 2. Hardware & wiring
 
-- Module: **WT0132C6‑S5** (ESP32‑C6), 4 MB flash.
+- Module: **WT0132C6‑S5** (ESP32‑C6), 4 MB flash. It doesn't fit directly on the Tuya board, so it
+  sits on a converter board from [ESP12F-converterboards](https://github.com/Cptmeme/ESP12F-converterboards).
 - Tuya MCU is on the board's dedicated **RX/TX port = UART0 = GPIO16 (TX0) / GPIO17 (RX0)**.
   - `ESP TX GPIO16 → MCU RX`, `ESP RX GPIO17 ← MCU TX`. 9600 8N1.
   - If you ever see only outgoing `>>>` and no `<<<`, swap the two pins.
