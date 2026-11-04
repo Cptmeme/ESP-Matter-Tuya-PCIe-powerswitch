@@ -11,8 +11,11 @@ replacing the stock Tuya Wi-Fi module. Exposes a single **On/Off** endpoint:
 The switch state always reflects the MCU's *sensed* PC power state, so a Windows shutdown
 shows up as Off on its own.
 
-The WT0132C6-S5 doesn't fit directly on the Tuya board, so it sits on one of the converter
-boards from [ESP12F-converterboards](https://github.com/Cptmeme/ESP12F-converterboards).
+The WT0132C6-S5 doesn't fit directly on the Tuya board, so it sits on the
+[T1UHL-ESP12 converter board](https://github.com/Cptmeme/ESP12F-converterboards/tree/main/T1UHL-ESP12_board)
+from ESP12F-converterboards.
+
+<img src="docs/media/pc-switch-board.jpg" width="480" alt="WT0132C6-S5 module on a green converter board, soldered onto the Tuya PCIe remote power card">
 
 The Tuya MCU is on **UART0 (GPIO16/17)**; the ESP console is moved to USB-Serial-JTAG
 so those pins are free (see `sdkconfig.defaults.esp32c6`). The Tuya serial handshake
