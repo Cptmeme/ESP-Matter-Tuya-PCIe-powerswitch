@@ -1,3 +1,4 @@
+#include <atomic>
 #include <esp_log.h>
 #include <stdlib.h>
 #include <string.h>
@@ -5,10 +6,6 @@
 #include <app_priv.h>
 #include <app/reporting/reporting.h>
 #include <platform/CHIPDeviceLayer.h>
-#include "iot_button.h"
-#include "button_gpio.h"
-#include <app/server/Server.h>
-#include <app/server/CommissioningWindowManager.h>
 
 #include "tuya_driver.h"
 
@@ -19,7 +16,14 @@ static const char *TAG = "app_driver";
 extern uint16_t pc_switch_endpoint_id;
 static TuyaPcSwitch pcsw;
 
-#define BUTTON_GPIO_PIN 23
+// Matter's startup can change OnOff by itself (StartUpOnOff defaults to Off), so no
+// button press until it has finished: restarting the ESP must never touch the PC.
+static std::atomic<bool> s_matter_started{false};
+
+void app_driver_matter_started()
+{
+    s_matter_started = true;
+}
 
 // --- POLL TASK ---
 static void tuya_poll_task(void *pvParameters)
@@ -59,6 +63,13 @@ static void tuya_state_change_callback(const pcswitch_state_t *state)
     chip::DeviceLayer::PlatformMgr().ScheduleWork(ReportSensedTask, (intptr_t)state->power);
 }
 
+// The Tuya board's button was held: forget the Matter pairing. This restarts when done.
+static void tuya_reset_callback()
+{
+    ESP_LOGW(TAG, "Matter factory reset");
+    esp_matter::factory_reset();
+}
+
 // After a UI/controller "Off", re-assert the real sensed state so the switch
 // reverts (we never actually command the PC off).
 static void RevertToSensedTask(intptr_t context)
@@ -72,19 +83,24 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle, uint16_
 {
     if (endpoint_id == pc_switch_endpoint_id && cluster_id == OnOff::Id &&
         attribute_id == OnOff::Attributes::OnOff::Id) {
+        bool pc_on = pcsw.GetState().power;
         if (val->val.b) {
-            if (pcsw.GetState().power) {
-                // Already running: never tap the button of a live PC.
-                ESP_LOGI(TAG, "Matter: PC Power ON ignored (PC already on)");
-            } else {
-                // ON -> tap the PC power button.
+            if (s_matter_started && !pc_on) {
                 ESP_LOGI(TAG, "Matter: PC Power ON -> pressing button");
                 pcsw.PressPowerOn();
+            } else {
+                ESP_LOGI(TAG, "Matter: PC Power ON, no button press");
             }
         } else {
-            // OFF -> send nothing; revert the attribute to the real sensed state
-            // (runs after this update commits).
-            ESP_LOGI(TAG, "Matter: PC Power OFF ignored (revert to sensed state)");
+            // What a press does to a running PC is up to the OS. Either way, revert the
+            // attribute to the sensed state (runs after this update commits): it only
+            // shows Off once the PC really is off.
+            if (s_matter_started && pc_on) {
+                ESP_LOGI(TAG, "Matter: PC Power OFF -> pressing button");
+                pcsw.PressPowerOff();
+            } else {
+                ESP_LOGI(TAG, "Matter: PC Power OFF, no button press");
+            }
             chip::DeviceLayer::PlatformMgr().ScheduleWork(RevertToSensedTask, 0);
         }
     }
@@ -95,29 +111,7 @@ app_driver_handle_t app_driver_pcswitch_init()
 {
     pcsw.Init(TUYA_TX_PIN, TUYA_RX_PIN);
     pcsw.SetStateCallback(tuya_state_change_callback);
+    pcsw.SetResetCallback(tuya_reset_callback);
     xTaskCreate(tuya_poll_task, "tuya_poll", 4096, NULL, 5, NULL);
     return (app_driver_handle_t)1;
-}
-
-static void app_driver_button_toggle_cb(void *arg, void *data)
-{
-    ESP_LOGI(TAG, "Button: Commissioning Window");
-    chip::CommissioningWindowManager & commissionMgr = chip::Server::GetInstance().GetCommissioningWindowManager();
-    if (!commissionMgr.IsCommissioningWindowOpen()) {
-        commissionMgr.OpenBasicCommissioningWindow(chip::System::Clock::Seconds16(300),
-                                                   chip::CommissioningWindowAdvertisement::kDnssdOnly);
-    }
-}
-
-app_driver_handle_t app_driver_button_init()
-{
-    button_config_t btn_cfg = {0};
-    button_gpio_config_t btn_gpio_cfg = { .gpio_num = BUTTON_GPIO_PIN, .active_level = 0 };
-    button_handle_t btn_handle = NULL;
-    esp_err_t err = iot_button_new_gpio_device(&btn_cfg, &btn_gpio_cfg, &btn_handle);
-    if (err == ESP_OK && btn_handle) {
-        iot_button_register_cb(btn_handle, BUTTON_PRESS_DOWN, NULL, app_driver_button_toggle_cb, NULL);
-        return (app_driver_handle_t)btn_handle;
-    }
-    return NULL;
 }

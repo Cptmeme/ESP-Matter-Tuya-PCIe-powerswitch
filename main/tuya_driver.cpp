@@ -12,8 +12,17 @@ static const char *TAG = "TUYA_PCSW";
 
 #define BAUD_RATE 9600
 
+// Ignore the board's button this soon after boot, so a button still held after a
+// factory reset can't trigger another one.
+#define RESET_MIN_UPTIME_US 10000000
+
 TuyaPcSwitch::TuyaPcSwitch() {
     m_callback = nullptr;
+    m_reset_callback = nullptr;
+    m_reset_requested = false;
+    m_tx_queue = nullptr;
+    m_expected_reply = -1;
+    m_tx_time = 0;
     m_uart_num = UART_NUM_1;
 
     m_state.power = false;
@@ -30,6 +39,9 @@ TuyaPcSwitch::TuyaPcSwitch() {
 }
 
 esp_err_t TuyaPcSwitch::Init(int tx_pin, int rx_pin) {
+    m_tx_queue = xQueueCreate(TUYA_TX_QUEUE_LEN, sizeof(tuya_frame_t));
+    if (!m_tx_queue) return ESP_ERR_NO_MEM;
+
     uart_config_t uart_config = {
         .baud_rate = BAUD_RATE,
         .data_bits = UART_DATA_8_BITS,
@@ -84,16 +96,60 @@ void TuyaPcSwitch::SendCommand(uint8_t dp_id, uint8_t type, const uint8_t *value
     payload[idx++] = len & 0xFF;
     memcpy(&payload[idx], value, len);
     idx += len;
-    SendFrame(TUYA_CMD_SET_DP, payload, idx);
+    Enqueue(TUYA_CMD_SET_DP, payload, idx);
 }
 
-void TuyaPcSwitch::Heartbeat()        { SendFrame(TUYA_CMD_HEARTBEAT, nullptr, 0); }
-void TuyaPcSwitch::QueryStatus()      { SendFrame(TUYA_CMD_QUERY_DP, nullptr, 0); }
-void TuyaPcSwitch::SendProductQuery() { SendFrame(TUYA_CMD_PRODUCT, nullptr, 0); }
-void TuyaPcSwitch::SendConfQuery()    { SendFrame(TUYA_CMD_WORK_MODE, nullptr, 0); }
+void TuyaPcSwitch::Heartbeat()        { Enqueue(TUYA_CMD_HEARTBEAT, nullptr, 0); }
+void TuyaPcSwitch::QueryStatus()      { Enqueue(TUYA_CMD_QUERY_DP, nullptr, 0); }
+void TuyaPcSwitch::SendProductQuery() { Enqueue(TUYA_CMD_PRODUCT, nullptr, 0); }
+void TuyaPcSwitch::SendConfQuery()    { Enqueue(TUYA_CMD_WORK_MODE, nullptr, 0); }
 void TuyaPcSwitch::SendWifiStatus(uint8_t status) {
     uint8_t s = status;
-    SendFrame(TUYA_CMD_WIFI_STATE, &s, 1);
+    Enqueue(TUYA_CMD_WIFI_STATE, &s, 1);
+}
+
+// --- Command pacing ------------------------------------------------------
+
+void TuyaPcSwitch::Enqueue(uint8_t cmd, const uint8_t *payload, int len) {
+    tuya_frame_t frame = {};
+    frame.cmd = cmd;
+    frame.len = len;
+    if (len > 0) memcpy(frame.payload, payload, len);
+    if (xQueueSend(m_tx_queue, &frame, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "TX queue full, dropping command 0x%02X", cmd);
+    }
+}
+
+// The command the MCU answers a frame with, -1 if it doesn't answer.
+static int ExpectedReply(uint8_t cmd) {
+    switch (cmd) {
+    case TUYA_CMD_HEARTBEAT:
+    case TUYA_CMD_PRODUCT:
+    case TUYA_CMD_WORK_MODE:
+    case TUYA_CMD_WIFI_STATE:
+        return cmd;
+    case TUYA_CMD_SET_DP:
+    case TUYA_CMD_QUERY_DP:
+        return TUYA_CMD_REPORT_DP;
+    default:
+        return -1;
+    }
+}
+
+void TuyaPcSwitch::ProcessTxQueue() {
+    int64_t now = esp_timer_get_time();
+
+    // No reply just means moving on: nothing is resent, because a repeated DP1
+    // write would be another button press.
+    if (m_expected_reply >= 0 && now - m_tx_time < TUYA_REPLY_TIMEOUT_US) return;
+    m_expected_reply = -1;
+
+    tuya_frame_t frame;
+    if (xQueueReceive(m_tx_queue, &frame, 0) != pdTRUE) return;
+
+    SendFrame(frame.cmd, frame.payload, frame.len);
+    m_tx_time = now;
+    m_expected_reply = ExpectedReply(frame.cmd);
 }
 
 // --- Handshake / keep-alive state machine --------------------------------
@@ -129,7 +185,7 @@ void TuyaPcSwitch::RunStateMachine() {
 
     case TY_WIFI_STATUS:
         SendWifiStatus(TUYA_WIFI_ONLINE);
-        m_init_state = TY_QUERY;      // next tick queries DPs (~50 ms spacing)
+        m_init_state = TY_QUERY;
         m_last_action_time = now;
         break;
 
@@ -151,6 +207,7 @@ void TuyaPcSwitch::RunStateMachine() {
 void TuyaPcSwitch::Service() {
     Poll();
     RunStateMachine();
+    ProcessTxQueue();
 }
 
 // --- Frame RX ------------------------------------------------------------
@@ -206,6 +263,8 @@ void TuyaPcSwitch::Poll() {
 void TuyaPcSwitch::ProcessPacket(const uint8_t *packet, int len) {
     uint8_t cmd = packet[3];
 
+    if (cmd == m_expected_reply) m_expected_reply = -1;
+
     switch (cmd) {
     case TUYA_CMD_HEARTBEAT:
         // Reply byte: 0x00 = first beat after the MCU (re)booted, 0x01 = running.
@@ -232,6 +291,15 @@ void TuyaPcSwitch::ProcessPacket(const uint8_t *packet, int len) {
         break;
     }
 
+    case TUYA_CMD_WIFI_RESET:
+        Enqueue(TUYA_CMD_WIFI_RESET, nullptr, 0);
+        if (!m_reset_requested && esp_timer_get_time() > RESET_MIN_UPTIME_US) {
+            m_reset_requested = true;
+            ESP_LOGW(TAG, "Button held on the Tuya board");
+            if (m_reset_callback) m_reset_callback();
+        }
+        break;
+
     case TUYA_CMD_REPORT_DP:
         ParseDatapoints(packet, len);
         break;
@@ -240,7 +308,7 @@ void TuyaPcSwitch::ProcessPacket(const uint8_t *packet, int len) {
         // No wall clock over Thread: answer "time not obtained" (first byte 0),
         // like ESPHome does without a valid time, so the MCU isn't left waiting.
         static const uint8_t no_time[8] = {0};
-        SendFrame(TUYA_CMD_GET_TIME, no_time, sizeof(no_time));
+        Enqueue(TUYA_CMD_GET_TIME, no_time, sizeof(no_time));
         break;
     }
 
@@ -297,6 +365,15 @@ void TuyaPcSwitch::PressPowerOn() {
     // state so our reported value always reflects reality.
 }
 
+void TuyaPcSwitch::PressPowerOff() {
+    uint8_t val = 0;
+    SendCommand(DP_POWER, 0x01, &val, 1);
+}
+
 void TuyaPcSwitch::SetStateCallback(tuya_state_change_cb_t cb) {
     m_callback = cb;
+}
+
+void TuyaPcSwitch::SetResetCallback(tuya_reset_cb_t cb) {
+    m_reset_callback = cb;
 }

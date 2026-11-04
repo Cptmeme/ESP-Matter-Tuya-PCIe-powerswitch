@@ -5,15 +5,28 @@ Matter-over-Thread firmware for a Tuya PC power-switch board (WT0132C6-S5 / ESP3
 replacing the stock Tuya Wi-Fi module. Exposes a single **On/Off** endpoint:
 
 - **On** taps the PC power button (Tuya DP1 write), unless the PC is already on.
-- **Off** is a no-op (the OS handles shutdown); the switch state always reflects the
-  MCU's *sensed* PC power state, so a Windows shutdown shows up as Off on its own.
+- **Off** taps it too, unless the PC is already off. What that does is up to Windows
+  (Power Options, "When I press the power button"): shut down, sleep or nothing.
+
+The switch state always reflects the MCU's *sensed* PC power state, so a Windows shutdown
+shows up as Off on its own.
 
 The Tuya MCU is on **UART0 (GPIO16/17)**; the ESP console is moved to USB-Serial-JTAG
 so those pins are free (see `sdkconfig.defaults.esp32c6`). The Tuya serial handshake
 (product / work-mode / network-status) and framing live in `main/tuya_driver.*`.
 
-First flash must be wired over native USB (or with the MCU's TX line isolated), since
-the MCU shares the UART0 programming pads. After that, Matter OTA works.
+Those two pins, the module's TXD and RXD pads, are the only ones the firmware uses:
+TX = GPIO16 (to MCU RX), RX = GPIO17 (from MCU TX).
+
+The module has no USB pads (GPIO12/13 aren't broken out), so the console and its logs
+can't be reached on this board.
+
+To factory-reset the switch, hold the button on the Tuya board for a few seconds. The MCU
+reports this over serial, and the switch clears its Matter pairing and restarts.
+
+First flash goes through the TXD/RXD pads, with GPIO9 low and GPIO8 high at reset and the
+MCU's TX line isolated (or before the module is soldered on), since the MCU shares those
+pads. After that, Matter OTA works.
 
 See the [docs](https://docs.espressif.com/projects/esp-matter/en/latest/esp32/developing.html) for building and flashing.
 

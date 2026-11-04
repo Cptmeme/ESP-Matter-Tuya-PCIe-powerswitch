@@ -49,8 +49,9 @@ CONFIG_ENABLE_WIFI_STATION=n
 CONFIG_BUTTON_PERIOD_TIME_MS=20
 CONFIG_BUTTON_LONG_PRESS_TIME_MS=5000
 
-# Enable chip shell
-CONFIG_ENABLE_CHIP_SHELL=y
+# No chip shell. The console is on USB-Serial-JTAG, but the WT0132C6-S5 has no USB pads,
+# so a shell's read returns at once and its loop starves the Matter thread: pairing hangs.
+CONFIG_ENABLE_CHIP_SHELL=n
 
 # The Tuya MCU is on UART0 (GPIO16/17). Move the console to USB-Serial-JTAG so
 # those pins are free for the Tuya bus and the ESP never talks over that line.

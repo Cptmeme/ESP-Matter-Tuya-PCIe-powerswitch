@@ -12,7 +12,6 @@
 #include <log_heap_numbers.h>
 
 #include <app_priv.h>
-#include <app_reset.h>
 #if CHIP_DEVICE_CONFIG_ENABLE_THREAD
 #include <platform/ESP32/OpenthreadLauncher.h>
 #endif
@@ -169,15 +168,14 @@ extern "C" void app_main()
     nvs_flash_init();
 
     app_driver_handle_t pcswitch_handle = app_driver_pcswitch_init();
-    app_driver_handle_t button_handle = app_driver_button_init();
-    app_reset_button_register(button_handle);
 
     node::config_t node_config;
     node_t *node = node::create(&node_config, app_attribute_update_cb, app_identification_cb);
 
     // Single On/Off endpoint = the PC power switch.
     // ON  -> taps the power button (DP1 = 1).
-    // OFF -> no-op (handled in app_driver); state always reflects the sensed PC power.
+    // OFF -> taps it too (DP1 = 0); the OS decides what that does.
+    // State always reflects the sensed PC power (handled in app_driver).
     on_off_plug_in_unit::config_t pc_config = {};
     pc_config.on_off.on_off = false;
     endpoint_t *pc_ep = on_off_plug_in_unit::create(node, &pc_config, ENDPOINT_FLAG_NONE, pcswitch_handle);
@@ -209,6 +207,7 @@ extern "C" void app_main()
 #endif // CONFIG_ENABLE_SET_CERT_DECLARATION_API
 
     esp_matter::start(app_event_cb);
+    app_driver_matter_started();
     app_ota_verify_start();
 
 #if CONFIG_ENABLE_CHIP_SHELL
