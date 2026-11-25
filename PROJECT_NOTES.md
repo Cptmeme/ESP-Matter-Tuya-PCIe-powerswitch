@@ -116,22 +116,9 @@ Single Matter **On/Off Plug‑in Unit** endpoint = "PC Power":
 
 ## 6. Build & flash
 
-### One‑time toolchain fix (needed now)
-System Python went 3.13 → 3.14, so `export.sh` looks for a `idf5.3_py3.14_env` that
-doesn't exist. Re‑provision the venv:
-```bash
-cd ~/esp/esp-idf && ./install.sh esp32c6
-```
-(The old `idf5.3_py3.13_env` still exists if you'd rather force Python 3.13 on PATH.)
-Without reinstalling, this works (verified 2026-09-14, clean build):
-```bash
-export IDF_PYTHON_ENV_PATH=~/.espressif/python_env/idf5.3_py3.13_env
-```
-
 ### Build / flash
 ```bash
-source ~/esp/esp-idf/export.sh
-source ~/.espressif/esp-matter/export.sh
+. ~/.espressif/tools/activate_esp_matter_v1.6.1.sh   # ESP-IDF 6.0.2 + esp-matter 1.6.1
 cd ~/esp/ESP-Matter-Tuya-PCIe-powerswitch
 idf.py -DIDF_TARGET=esp32c6 build           # (target already set once build/ exists)
 idf.py -p <port> erase-flash flash          # first flash over the TXD/RXD pads; then OTA

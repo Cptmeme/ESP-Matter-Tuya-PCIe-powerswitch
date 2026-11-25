@@ -60,7 +60,9 @@ static void ReportSensedTask(intptr_t context)
 
 static void tuya_state_change_callback(const pcswitch_state_t *state)
 {
-    chip::DeviceLayer::PlatformMgr().ScheduleWork(ReportSensedTask, (intptr_t)state->power);
+    if (chip::DeviceLayer::PlatformMgr().ScheduleWork(ReportSensedTask, (intptr_t)state->power) != CHIP_NO_ERROR) {
+        ESP_LOGW(TAG, "Could not schedule the sensed power report");
+    }
 }
 
 // The Tuya board's button was held: forget the Matter pairing. This restarts when done.
@@ -101,7 +103,9 @@ esp_err_t app_driver_attribute_update(app_driver_handle_t driver_handle, uint16_
             } else {
                 ESP_LOGI(TAG, "Matter: PC Power OFF, no button press");
             }
-            chip::DeviceLayer::PlatformMgr().ScheduleWork(RevertToSensedTask, 0);
+            if (chip::DeviceLayer::PlatformMgr().ScheduleWork(RevertToSensedTask, 0) != CHIP_NO_ERROR) {
+                ESP_LOGW(TAG, "Could not schedule the revert to the sensed state");
+            }
         }
     }
     return ESP_OK;

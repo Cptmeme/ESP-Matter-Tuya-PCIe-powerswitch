@@ -34,7 +34,9 @@ First flash goes through the TXD/RXD pads, with GPIO9 low and GPIO8 high at rese
 MCU's TX line isolated (or before the module is soldered on), since the MCU shares those
 pads. After that, Matter OTA works.
 
-See the [docs](https://docs.espressif.com/projects/esp-matter/en/latest/esp32/developing.html) for building and flashing.
+Built with ESP-IDF v6.0.2 and esp-matter v1.6.1 (`release/v1.6.1`). Versions up to 1.2 were
+built with ESP-IDF v5.5.4 and esp-matter v1.5. See the
+[docs](https://docs.espressif.com/projects/esp-matter/en/latest/esp32/developing.html) for building and flashing.
 
 ## Updating the Firmware
 
@@ -83,6 +85,10 @@ After the download the switch restarts into the new version and keeps it once it
 for a minute while attached to the Thread network. If it doesn't get there within 5
 minutes, or crashes before that, the bootloader automatically returns to the previous
 version.
+
+The bootloader can start apps built with newer ESP-IDF versions, but not older ones. A switch
+flashed over serial with version 1.3 or later (ESP-IDF 6) can't be updated back to 1.2 or earlier
+(ESP-IDF 5.5). One flashed with an earlier version can take 1.3 over the air.
 
 Rollback needs the bootloader from this build, and the bootloader can only be written over
 serial. A switch that has only been updated over the air still updates fine, it just
